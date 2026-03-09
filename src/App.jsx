@@ -283,9 +283,9 @@ const LoginScreen = ({ onLogin }) => {
         borderRadius: 20, padding: 50, border: "1px solid rgba(255,255,255,0.2)",
         textAlign: "center", maxWidth: 400, width: "90%",
       }}>
-        <div style={{ fontSize: 48, fontWeight: 800, color: "#fff", letterSpacing: 2, marginBottom: 8, fontFamily: "'DM Sans', sans-serif" }}>
-          ADIPA
-        </div>
+        <div style={{ fontSize: 48, fontWeight: 800, color: "#fff", letterSpacing: 2, ... }}>
+  🚀 ADIPA
+</div>
         <div style={{ color: "rgba(255,255,255,0.7)", fontSize: 14, marginBottom: 12, fontFamily: "'DM Sans', sans-serif" }}>
           adipa.report/yoy
         </div>
