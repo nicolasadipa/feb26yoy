@@ -3,30 +3,78 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🚀 ADIPA - Acceso</title>
+    <title>🚀 ADIPA - Feb 2026</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        body { margin: 0; font-family: sans-serif; background: #1e1b4b; display: flex; align-items: center; justify-content: center; height: 100vh; color: white; }
-        .login-box { background: rgba(255, 255, 255, 0.1); backdrop-filter: blur(10px); border-radius: 20px; padding: 50px; border: 1px solid rgba(255, 255, 255, 0.2); text-align: center; width: 350px; }
-        .login-title { font-size: 32px; font-weight: 800; margin-bottom: 20px; }
-        input { width: 100%; padding: 15px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.3); background: rgba(0,0,0,0.2); color: white; margin-bottom: 20px; box-sizing: border-box; }
-        button { width: 100%; padding: 15px; background: #7c3aed; border: none; border-radius: 10px; color: white; font-weight: 700; cursor: pointer; }
+        body { margin: 0; font-family: 'Segoe UI', sans-serif; background: #13152a; color: white; }
+        .login-screen { position: fixed; inset: 0; background: linear-gradient(135deg, #1e1b4b 0%, #312e81 100%); display: flex; align-items: center; justify-content: center; z-index: 100; }
+        .login-box { background: rgba(255, 255, 255, 0.1); backdrop-filter: blur(10px); border-radius: 20px; padding: 40px; border: 1px solid rgba(255, 255, 255, 0.2); text-align: center; width: 320px; }
+        input { width: 100%; padding: 12px; margin: 20px 0; border-radius: 8px; border: none; background: rgba(255,255,255,0.1); color: white; box-sizing: border-box; }
+        button { width: 100%; padding: 12px; background: #7c3aed; border: none; border-radius: 8px; color: white; font-weight: bold; cursor: pointer; }
+        #dashboard { display: none; padding: 20px; }
+        .card { background: #1c1f3a; border-radius: 15px; padding: 20px; border: 1px solid #2e2b4a; margin-top: 20px; }
+        canvas { max-height: 400px; }
     </style>
 </head>
 <body>
-    <div class="login-box">
-        <div class="login-title">🚀 ADIPA</div>
-        <p>Dashboard Feb 2026</p>
-        <input type="password" id="pass" placeholder="Contraseña">
-        <button onclick="validar()">Acceder</button>
+
+    <div id="loginScreen" class="login-screen">
+        <div class="login-box">
+            <div style="font-size: 24px; font-weight: 800; margin-bottom: 10px;">🚀 ADIPA</div>
+            <p>Reporte Febrero 2026</p>
+            <input type="password" id="pass" placeholder="Contraseña">
+            <button onclick="acceder()">Acceder</button>
+        </div>
     </div>
+
+    <div id="dashboard">
+        <h1>Dashboard Ventas YoY</h1>
+        <div class="card">
+            <h3 style="color: #9994b0;">COMPARATIVO VENTAS POR PAÍS (USD)</h3>
+            <canvas id="ventasChart"></canvas>
+        </div>
+    </div>
+
     <script>
-        function validar() {
-            if (document.getElementById('pass').value === 'consejo') {
-                // Si la clave es correcta, mostramos el contenido oculto
-                window.location.hash = "dashboard";
-                document.body.innerHTML = "<h1>Cargando Dashboard...</h1>";
-                location.reload(); 
-            } else { alert("Error"); }
+        function acceder() {
+            const pass = document.getElementById('pass').value;
+            if (pass === 'consejo') {
+                document.getElementById('loginScreen').style.display = 'none';
+                document.getElementById('dashboard').style.display = 'block';
+                renderCharts();
+            } else {
+                alert('Clave incorrecta');
+            }
+        }
+
+        function renderCharts() {
+            const ctx = document.getElementById('ventasChart').getContext('2d');
+            new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: ['Chile', 'México', 'Colombia'],
+                    datasets: [
+                        {
+                            label: 'Ene-Feb 2025',
+                            data: [62000, 17000, 11000],
+                            backgroundColor: '#6b5b8d'
+                        },
+                        {
+                            label: 'Ene-Feb 2026',
+                            data: [78000, 25000, 16000],
+                            backgroundColor: '#8b5cf6'
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    plugins: { legend: { labels: { color: '#eae8f0' } } },
+                    scales: {
+                        y: { grid: { color: '#2e2b4a' }, ticks: { color: '#9994b0' } },
+                        x: { ticks: { color: '#9994b0' } }
+                    }
+                }
+            });
         }
     </script>
 </body>
