@@ -409,9 +409,9 @@ export default function Dashboard() {
     ...PROGRAMS.map((p) => ({ key: p as ViewMode, label: p })),
   ];
 
-  if (!loggedIn) return <LoginScreen onLogin={() => setLoggedIn(true)} />;
-
   const displayData = useMemo(() => applyIva(data, excludeIva), [data, excludeIva]);
+
+  if (!loggedIn) return <LoginScreen onLogin={() => setLoggedIn(true)} />;
 
   const activePrograms = view === "consolidated" || view === "modalidad" ? PROGRAMS : [view as ProgramType];
   const periodLabel = `${dateFrom} → ${dateTo}`;
