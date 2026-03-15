@@ -29,9 +29,26 @@ function getClient(): BigQuery {
   });
 }
 
-// Query accepts a date range for the "current" period.
-// The previous period is the same date range shifted back 1 year.
-const QUERY = `
+// Validates date is YYYY-MM-DD format to safely use in SQL string interpolation
+function safeDate(d: string): string {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) throw new Error(`Invalid date: ${d}`);
+  return d;
+}
+
+function prevYear(d: string): string {
+  return `${parseInt(d.slice(0, 4)) - 1}${d.slice(4)}`;
+}
+
+function buildQuery(dateFrom: string, dateTo: string): string {
+  const df  = safeDate(dateFrom);
+  const dt  = safeDate(dateTo);
+  const pf  = prevYear(df);
+  const pt  = prevYear(dt);
+  const yCurr = parseInt(dt.slice(0, 4));
+  const yPrev = yCurr - 1;
+  const excl  = EXCLUDED.map((e) => `'${e}'`).join(", ");
+
+  return `
 WITH all_ventas AS (
   SELECT Cust_id, Date_oc, Tipo_producto, Pais, Id_oc,
          CAST(Valor_pagado AS FLOAT64)   AS Valor_pagado,
@@ -59,32 +76,26 @@ ventas_period AS (
     v.Cust_id, v.Tipo_producto, v.Pais, v.Id_oc,
     v.Valor_pagado,
     COALESCE(v.Num_items_sold, 1) AS Num_items_sold,
-    -- Label each row as current year or previous year
     CASE
-      WHEN DATE(v.Date_oc) BETWEEN @date_from AND @date_to
-      THEN EXTRACT(YEAR FROM @date_to)
-      ELSE EXTRACT(YEAR FROM DATE_SUB(@date_to, INTERVAL 1 YEAR))
+      WHEN Date_oc >= '${df}' AND Date_oc <= '${dt} 23:59:59' THEN ${yCurr}
+      ELSE ${yPrev}
     END AS anio,
-    -- New client = first purchase falls within the same period (current or prev)
     CASE
-      WHEN DATE(v.Date_oc) BETWEEN @date_from AND @date_to
-        AND DATE(fp.primera_compra) BETWEEN @date_from AND @date_to
+      WHEN Date_oc >= '${df}' AND Date_oc <= '${dt} 23:59:59'
+        AND fp.primera_compra >= '${df}' AND fp.primera_compra <= '${dt} 23:59:59'
       THEN TRUE
-      WHEN DATE(v.Date_oc) BETWEEN DATE_SUB(@date_from, INTERVAL 1 YEAR)
-                                AND DATE_SUB(@date_to, INTERVAL 1 YEAR)
-        AND DATE(fp.primera_compra) BETWEEN DATE_SUB(@date_from, INTERVAL 1 YEAR)
-                                        AND DATE_SUB(@date_to, INTERVAL 1 YEAR)
+      WHEN Date_oc >= '${pf}' AND Date_oc <= '${pt} 23:59:59'
+        AND fp.primera_compra >= '${pf}' AND fp.primera_compra <= '${pt} 23:59:59'
       THEN TRUE
       ELSE FALSE
     END AS es_nuevo
   FROM all_ventas v
   LEFT JOIN first_purchase fp ON v.Cust_id = fp.Cust_id
   WHERE (
-    DATE(v.Date_oc) BETWEEN @date_from AND @date_to
-    OR DATE(v.Date_oc) BETWEEN DATE_SUB(@date_from, INTERVAL 1 YEAR)
-                           AND DATE_SUB(@date_to, INTERVAL 1 YEAR)
+    (Date_oc >= '${df}' AND Date_oc <= '${dt} 23:59:59')
+    OR (Date_oc >= '${pf}' AND Date_oc <= '${pt} 23:59:59')
   )
-  AND v.Tipo_producto NOT IN UNNEST(@excluded)
+  AND v.Tipo_producto NOT IN (${excl})
   AND v.Tipo_producto IS NOT NULL
 )
 SELECT
@@ -103,22 +114,12 @@ SELECT
 FROM ventas_period
 GROUP BY country, program, year
 ORDER BY country, program, year
-`;
+  `;
+}
 
 export async function fetchMetricsFromBQ(dateFrom: string, dateTo: string): Promise<ProgramMetrics[]> {
   const bq = getClient();
-  const [rows] = await bq.query({
-    query: QUERY,
-    params: {
-      date_from: dateFrom,
-      date_to:   dateTo,
-      excluded:  EXCLUDED,
-    },
-    types: {
-      date_from: "DATE",
-      date_to:   "DATE",
-    },
-  });
+  const [rows] = await bq.query({ query: buildQuery(dateFrom, dateTo) });
 
   return rows
     .filter((r: Record<string, unknown>) =>
