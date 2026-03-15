@@ -61,6 +61,23 @@ const fmt = (n: number) => {
 const today = () => new Date().toISOString().slice(0, 10);
 const startOfYear = (date: string) => `${date.slice(0, 4)}-01-01`;
 
+// IVA por país (Chile es exento)
+const IVA: Record<Country, number> = { Chile: 1.0, México: 1.16, Colombia: 1.19 };
+
+function applyIva(data: ProgramMetrics[], exclude: boolean): ProgramMetrics[] {
+  if (!exclude) return data;
+  return data.map((r) => {
+    const factor = IVA[r.country];
+    if (factor === 1.0) return r;
+    const monto = r.ventas_monto / factor;
+    return {
+      ...r,
+      ventas_monto:    monto,
+      ticket_promedio: r.ventas_pedidos > 0 ? monto / r.ventas_pedidos : 0,
+    };
+  });
+}
+
 function aggregate(rows: ProgramMetrics[]): AggregatedMetrics {
   const t = rows.reduce(
     (a, r) => ({
@@ -359,10 +376,11 @@ export default function Dashboard() {
   const [data,     setData]     = useState<ProgramMetrics[]>([]);
   const [source,   setSource]   = useState<"bigquery" | "mock">("mock");
   const [loading,  setLoading]  = useState(true);
-  const [dateFrom, setDateFrom] = useState("2026-01-01");
-  const [dateTo,   setDateTo]   = useState(today());
-  const [yearCurr, setYearCurr] = useState(2026);
-  const [yearPrev, setYearPrev] = useState(2025);
+  const [dateFrom,    setDateFrom]    = useState("2026-01-01");
+  const [dateTo,      setDateTo]      = useState(today());
+  const [yearCurr,    setYearCurr]    = useState(2026);
+  const [yearPrev,    setYearPrev]    = useState(2025);
+  const [excludeIva,  setExcludeIva]  = useState(false);
 
   const fetchData = (from: string, to: string) => {
     setLoading(true);
@@ -392,6 +410,8 @@ export default function Dashboard() {
   ];
 
   if (!loggedIn) return <LoginScreen onLogin={() => setLoggedIn(true)} />;
+
+  const displayData = useMemo(() => applyIva(data, excludeIva), [data, excludeIva]);
 
   const activePrograms = view === "consolidated" || view === "modalidad" ? PROGRAMS : [view as ProgramType];
   const periodLabel = `${dateFrom} → ${dateTo}`;
@@ -432,8 +452,33 @@ export default function Dashboard() {
         <Image src="/yoy/logo-adipa.svg" alt="ADIPA" width={100} height={54} />
       </div>
 
-      {/* Date Range Picker */}
-      <DateRangePicker dateFrom={dateFrom} dateTo={dateTo} onChange={fetchData} loading={loading} />
+      {/* Date Range Picker + IVA toggle */}
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-start" }}>
+        <div style={{ flex: 1 }}>
+          <DateRangePicker dateFrom={dateFrom} dateTo={dateTo} onChange={fetchData} loading={loading} />
+        </div>
+        <div style={{ background: "#1c1f3a", border: "1px solid #2e2b4a", borderRadius: 12, padding: "14px 18px", display: "flex", flexDirection: "column", gap: 8, minWidth: 220 }}>
+          <span style={{ fontSize: 10, color: C.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 600 }}>Tratamiento IVA</span>
+          <div style={{ display: "flex", gap: 6 }}>
+            {[false, true].map((val) => (
+              <button key={String(val)} onClick={() => setExcludeIva(val)} style={{
+                flex: 1, padding: "7px 10px", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer",
+                border: `1px solid ${excludeIva === val ? C.purple : C.border}`,
+                background: excludeIva === val ? C.purple : "transparent",
+                color: excludeIva === val ? "#fff" : C.muted, transition: "all 0.15s",
+              }}>
+                {val ? "Sin IVA" : "Con IVA"}
+              </button>
+            ))}
+          </div>
+          <div style={{ fontSize: 10, color: C.muted, lineHeight: 1.5 }}>
+            {excludeIva
+              ? <><span style={{ color: C.green }}>✓ Precios netos</span> · MX ÷1.16 · CO ÷1.19</>
+              : <><span style={{ color: C.amber }}>Precios con IVA</span> · MX 16% · CO 19%</>}
+            <br />Chile siempre exento
+          </div>
+        </div>
+      </div>
 
       {/* Country tabs */}
       <div style={{ display: "flex", gap: 6, marginBottom: 8, flexWrap: "wrap" }}>
@@ -484,11 +529,11 @@ export default function Dashboard() {
                   </span>
                 </div>
               )}
-              <MetricBlock data={data} country={country} programs={activePrograms} {...metricProps} />
+              <MetricBlock data={displayData} country={country} programs={activePrograms} {...metricProps} />
               {view === "consolidated" && (
                 <div style={{ marginTop: 32 }}>
                   <div style={{ fontSize: 14, fontWeight: 700, color: C.muted, marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.04em" }}>Ventas por Tipo de Programa</div>
-                  <SmallMultiples data={data} programs={PROGRAMS} country={country} {...metricProps} />
+                  <SmallMultiples data={displayData} programs={PROGRAMS} country={country} {...metricProps} />
                 </div>
               )}
             </>
@@ -499,14 +544,14 @@ export default function Dashboard() {
               <div style={{ borderTop: `2px solid ${C.cyan}44`, paddingTop: 20, marginBottom: 32 }}>
                 <div style={{ fontSize: 18, fontWeight: 800, color: C.cyan, marginBottom: 4 }}>Sincrónico</div>
                 <div style={{ fontSize: 11, color: C.muted, marginBottom: 16 }}>{syncPrograms.join(" · ")}</div>
-                <MetricBlock data={data} country={country} programs={syncPrograms} {...metricProps} />
-                <SmallMultiples data={data} programs={syncPrograms} country={country} {...metricProps} />
+                <MetricBlock data={displayData} country={country} programs={syncPrograms} {...metricProps} />
+                <SmallMultiples data={displayData} programs={syncPrograms} country={country} {...metricProps} />
               </div>
               <div style={{ borderTop: `2px solid ${C.amber}44`, paddingTop: 20 }}>
                 <div style={{ fontSize: 18, fontWeight: 800, color: C.amber, marginBottom: 4 }}>Asincrónico</div>
                 <div style={{ fontSize: 11, color: C.muted, marginBottom: 16 }}>{asyncPrograms.join(" · ")}</div>
-                <MetricBlock data={data} country={country} programs={asyncPrograms} {...metricProps} />
-                <SmallMultiples data={data} programs={asyncPrograms} country={country} {...metricProps} />
+                <MetricBlock data={displayData} country={country} programs={asyncPrograms} {...metricProps} />
+                <SmallMultiples data={displayData} programs={asyncPrograms} country={country} {...metricProps} />
               </div>
             </>
           )}
