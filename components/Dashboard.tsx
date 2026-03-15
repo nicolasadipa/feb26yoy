@@ -21,8 +21,8 @@ const C = {
   amber:     "#f59e0b",
   green:     "#34d399",
   red:       "#f87171",
-  y2025:     "#6b5b8d",
-  y2026:     "#8b5cf6",
+  yCurr:     "#8b5cf6",
+  yPrev:     "#6b5b8d",
 };
 
 const PROGRAMS: ProgramType[] = [
@@ -48,8 +48,9 @@ const MODALIDAD: Record<ProgramType, "Sincrónico" | "Asincrónico"> = {
 const COUNTRIES: Country[] = ["Chile", "México", "Colombia"];
 const COUNTRY_VIEWS: CountryView[] = ["Consolidado", "Chile", "México", "Colombia"];
 
-const pct = (a: number, b: number) =>
-  b ? (((a - b) / b) * 100).toFixed(1) : "0.0";
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+const pct = (curr: number, prev: number) =>
+  prev ? (((curr - prev) / prev) * 100).toFixed(1) : "0.0";
 
 const fmt = (n: number) => {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -57,9 +58,11 @@ const fmt = (n: number) => {
   return n.toLocaleString("es-CL");
 };
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+const today = () => new Date().toISOString().slice(0, 10);
+const startOfYear = (date: string) => `${date.slice(0, 4)}-01-01`;
+
 function aggregate(rows: ProgramMetrics[]): AggregatedMetrics {
-  const totals = rows.reduce(
+  const t = rows.reduce(
     (a, r) => ({
       clientes_totales:     a.clientes_totales     + r.clientes_totales,
       clientes_nuevos:      a.clientes_nuevos      + r.clientes_nuevos,
@@ -72,21 +75,15 @@ function aggregate(rows: ProgramMetrics[]): AggregatedMetrics {
     { clientes_totales: 0, clientes_nuevos: 0, clientes_recurrentes: 0,
       ventas_monto: 0, ventas_pedidos: 0, ventas_productos: 0, ticket_promedio: 0 }
   );
-  totals.ticket_promedio = totals.ventas_pedidos
-    ? Math.round(totals.ventas_monto / totals.ventas_pedidos)
-    : 0;
-  return totals;
+  t.ticket_promedio = t.ventas_pedidos ? Math.round(t.ventas_monto / t.ventas_pedidos) : 0;
+  return t;
 }
 
 function filterData(
-  data: ProgramMetrics[],
-  year: number,
-  country: CountryView,
-  programs: ProgramType[]
+  data: ProgramMetrics[], year: number, country: CountryView, programs: ProgramType[]
 ): ProgramMetrics[] {
   return data.filter(
-    (r) =>
-      r.year === year &&
+    (r) => r.year === year &&
       (country === "Consolidado" || r.country === country) &&
       programs.includes(r.program)
   );
@@ -109,8 +106,8 @@ const Tooltip_ = ({ active, payload, label }: { active?: boolean; payload?: { na
   );
 };
 
-const Badge = ({ value }: { value: string }) => {
-  const v = parseFloat(value);
+const Badge = ({ curr, prev }: { curr: number; prev: number }) => {
+  const v = parseFloat(pct(curr, prev));
   return (
     <span style={{
       fontSize: 11, fontWeight: 700,
@@ -118,22 +115,24 @@ const Badge = ({ value }: { value: string }) => {
       background: v >= 0 ? "#34d39918" : "#f8717118",
       padding: "2px 7px", borderRadius: 4, marginLeft: 6, fontFamily: "monospace",
     }}>
-      {v >= 0 ? "+" : ""}{value}%
+      {v >= 0 ? "+" : ""}{v.toFixed(1)}%
     </span>
   );
 };
 
-const KpiCard = ({ label, v25, v26, currency }: { label: string; v25: number; v26: number; currency?: boolean }) => (
+const KpiCard = ({
+  label, curr, prev, currency, yearCurr, yearPrev,
+}: { label: string; curr: number; prev: number; currency?: boolean; yearCurr: number; yearPrev: number }) => (
   <div style={{ background: C.card, borderRadius: 10, padding: "16px 20px", border: `1px solid ${C.border}`, flex: 1, minWidth: 140 }}>
     <div style={{ fontSize: 10, color: C.muted, textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 600 }}>{label}</div>
     <div style={{ display: "flex", alignItems: "baseline", gap: 4, marginTop: 8 }}>
       <span style={{ fontSize: 22, fontWeight: 800, color: C.text, fontFamily: "monospace", letterSpacing: "-0.02em" }}>
-        {currency ? "$" : ""}{currency ? fmt(v26) : v26.toLocaleString("es-CL")}
+        {currency ? "$" : ""}{currency ? fmt(curr) : curr.toLocaleString("es-CL")}
       </span>
-      <Badge value={pct(v26, v25)} />
+      <Badge curr={curr} prev={prev} />
     </div>
     <div style={{ fontSize: 11, color: C.muted, marginTop: 4, fontFamily: "monospace" }}>
-      vs {currency ? "$" : ""}{currency ? fmt(v25) : v25.toLocaleString("es-CL")} (2025)
+      vs {currency ? "$" : ""}{currency ? fmt(prev) : prev.toLocaleString("es-CL")} ({yearPrev})
     </div>
   </div>
 );
@@ -145,17 +144,20 @@ const ChartCard = ({ title, children }: { title: string; children: React.ReactNo
   </div>
 );
 
-function YoYBar({ data, prefix = "" }: { data: { country: string; "2025": number; "2026": number }[]; prefix?: string }) {
+function YoYBar({
+  data, prefix = "", yearCurr, yearPrev,
+}: { data: { country: string; curr: number; prev: number }[]; prefix?: string; yearCurr: number; yearPrev: number }) {
+  const chartData = data.map((d) => ({ country: d.country, [String(yearPrev)]: d.prev, [String(yearCurr)]: d.curr }));
   return (
     <ResponsiveContainer width="100%" height={200}>
-      <BarChart data={data} barGap={4} barCategoryGap="28%">
+      <BarChart data={chartData} barGap={4} barCategoryGap="28%">
         <CartesianGrid strokeDasharray="3 3" stroke={C.border} vertical={false} />
         <XAxis dataKey="country" tick={{ fill: C.muted, fontSize: 12 }} axisLine={false} tickLine={false} />
         <YAxis tick={{ fill: C.muted, fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={(v) => `${prefix}${fmt(v)}`} />
         <Tooltip content={<Tooltip_ />} />
         <Legend wrapperStyle={{ fontSize: 11 }} />
-        <Bar dataKey="2025" fill={C.y2025} radius={[4, 4, 0, 0]} />
-        <Bar dataKey="2026" fill={C.y2026} radius={[4, 4, 0, 0]} />
+        <Bar dataKey={String(yearPrev)} fill={C.yPrev} radius={[4,4,0,0]} />
+        <Bar dataKey={String(yearCurr)} fill={C.yCurr} radius={[4,4,0,0]} />
       </BarChart>
     </ResponsiveContainer>
   );
@@ -163,54 +165,47 @@ function YoYBar({ data, prefix = "" }: { data: { country: string; "2025": number
 
 // ─── Metric Block ─────────────────────────────────────────────────────────────
 function MetricBlock({
-  data,
-  country,
-  programs,
-}: {
-  data: ProgramMetrics[];
-  country: CountryView;
-  programs: ProgramType[];
-}) {
-  const d25 = aggregate(filterData(data, 2025, country, programs));
-  const d26 = aggregate(filterData(data, 2026, country, programs));
+  data, country, programs, yearCurr, yearPrev,
+}: { data: ProgramMetrics[]; country: CountryView; programs: ProgramType[]; yearCurr: number; yearPrev: number }) {
+  const dC = aggregate(filterData(data, yearCurr, country, programs));
+  const dP = aggregate(filterData(data, yearPrev, country, programs));
 
-  // Per-country chart data
-  const countryCols = country === "Consolidado" ? COUNTRIES : [country as Country];
+  const cols = country === "Consolidado" ? COUNTRIES : [country as Country];
 
   const buildChart = (field: keyof AggregatedMetrics) =>
-    countryCols.map((c) => ({
+    cols.map((c) => ({
       country: c,
-      "2025": aggregate(filterData(data, 2025, c, programs))[field] as number,
-      "2026": aggregate(filterData(data, 2026, c, programs))[field] as number,
+      curr: aggregate(filterData(data, yearCurr, c, programs))[field] as number,
+      prev: aggregate(filterData(data, yearPrev, c, programs))[field] as number,
     }));
+
+  const kpiProps = { yearCurr, yearPrev };
 
   return (
     <>
-      {/* KPI row */}
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 20 }}>
-        <KpiCard label="Clientes Totales"     v25={d25.clientes_totales}     v26={d26.clientes_totales} />
-        <KpiCard label="Clientes Nuevos"      v25={d25.clientes_nuevos}      v26={d26.clientes_nuevos} />
-        <KpiCard label="Clientes Recurrentes" v25={d25.clientes_recurrentes} v26={d26.clientes_recurrentes} />
-        <KpiCard label="Ventas (USD)"         v25={d25.ventas_monto}         v26={d26.ventas_monto}    currency />
-        <KpiCard label="N° Pedidos"           v25={d25.ventas_pedidos}       v26={d26.ventas_pedidos} />
-        <KpiCard label="N° Productos"         v25={d25.ventas_productos}     v26={d26.ventas_productos} />
-        <KpiCard label="Ticket Promedio"      v25={d25.ticket_promedio}      v26={d26.ticket_promedio} currency />
+        <KpiCard label="Clientes Totales"     curr={dC.clientes_totales}     prev={dP.clientes_totales}     {...kpiProps} />
+        <KpiCard label="Clientes Nuevos"      curr={dC.clientes_nuevos}      prev={dP.clientes_nuevos}      {...kpiProps} />
+        <KpiCard label="Clientes Recurrentes" curr={dC.clientes_recurrentes} prev={dP.clientes_recurrentes} {...kpiProps} />
+        <KpiCard label="Ventas (USD)"         curr={dC.ventas_monto}         prev={dP.ventas_monto}         currency {...kpiProps} />
+        <KpiCard label="N° Pedidos"           curr={dC.ventas_pedidos}       prev={dP.ventas_pedidos}       {...kpiProps} />
+        <KpiCard label="N° Productos"         curr={dC.ventas_productos}     prev={dP.ventas_productos}     {...kpiProps} />
+        <KpiCard label="Ticket Promedio"      curr={dC.ticket_promedio}      prev={dP.ticket_promedio}      currency {...kpiProps} />
       </div>
 
-      {/* Charts */}
       <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
         <ChartCard title="Clientes Totales por País">
-          <YoYBar data={buildChart("clientes_totales")} />
+          <YoYBar data={buildChart("clientes_totales")} yearCurr={yearCurr} yearPrev={yearPrev} />
         </ChartCard>
         <ChartCard title="Nuevos vs Recurrentes">
           <ResponsiveContainer width="100%" height={200}>
             <BarChart
-              data={countryCols.map((c) => ({
+              data={cols.map((c) => ({
                 country: c,
-                "Nuevos 25":      aggregate(filterData(data, 2025, c, programs)).clientes_nuevos,
-                "Recurrentes 25": aggregate(filterData(data, 2025, c, programs)).clientes_recurrentes,
-                "Nuevos 26":      aggregate(filterData(data, 2026, c, programs)).clientes_nuevos,
-                "Recurrentes 26": aggregate(filterData(data, 2026, c, programs)).clientes_recurrentes,
+                [`Nuevos ${yearPrev}`]:      aggregate(filterData(data, yearPrev, c, programs)).clientes_nuevos,
+                [`Rec. ${yearPrev}`]:        aggregate(filterData(data, yearPrev, c, programs)).clientes_recurrentes,
+                [`Nuevos ${yearCurr}`]:      aggregate(filterData(data, yearCurr, c, programs)).clientes_nuevos,
+                [`Rec. ${yearCurr}`]:        aggregate(filterData(data, yearCurr, c, programs)).clientes_recurrentes,
               }))}
               barGap={2} barCategoryGap="20%"
             >
@@ -219,24 +214,24 @@ function MetricBlock({
               <YAxis tick={{ fill: C.muted, fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={fmt} />
               <Tooltip content={<Tooltip_ />} />
               <Legend wrapperStyle={{ fontSize: 11 }} />
-              <Bar dataKey="Nuevos 25"      stackId="a" fill="#4a4368" />
-              <Bar dataKey="Recurrentes 25" stackId="a" fill={C.darkPurple} radius={[4,4,0,0]} />
-              <Bar dataKey="Nuevos 26"      stackId="b" fill={C.cyan} />
-              <Bar dataKey="Recurrentes 26" stackId="b" fill={C.purple} radius={[4,4,0,0]} />
+              <Bar dataKey={`Nuevos ${yearPrev}`}  stackId="a" fill="#4a4368" />
+              <Bar dataKey={`Rec. ${yearPrev}`}    stackId="a" fill={C.darkPurple} radius={[4,4,0,0]} />
+              <Bar dataKey={`Nuevos ${yearCurr}`}  stackId="b" fill={C.cyan} />
+              <Bar dataKey={`Rec. ${yearCurr}`}    stackId="b" fill={C.purple} radius={[4,4,0,0]} />
             </BarChart>
           </ResponsiveContainer>
         </ChartCard>
         <ChartCard title="Monto de Ventas (USD)">
-          <YoYBar data={buildChart("ventas_monto")} prefix="$" />
+          <YoYBar data={buildChart("ventas_monto")} prefix="$" yearCurr={yearCurr} yearPrev={yearPrev} />
         </ChartCard>
         <ChartCard title="N° de Pedidos">
-          <YoYBar data={buildChart("ventas_pedidos")} />
+          <YoYBar data={buildChart("ventas_pedidos")} yearCurr={yearCurr} yearPrev={yearPrev} />
         </ChartCard>
         <ChartCard title="N° de Productos Vendidos">
-          <YoYBar data={buildChart("ventas_productos")} />
+          <YoYBar data={buildChart("ventas_productos")} yearCurr={yearCurr} yearPrev={yearPrev} />
         </ChartCard>
         <ChartCard title="Ticket Promedio (USD)">
-          <YoYBar data={buildChart("ticket_promedio")} prefix="$" />
+          <YoYBar data={buildChart("ticket_promedio")} prefix="$" yearCurr={yearCurr} yearPrev={yearPrev} />
         </ChartCard>
       </div>
     </>
@@ -244,15 +239,17 @@ function MetricBlock({
 }
 
 // ─── Small multiples ──────────────────────────────────────────────────────────
-function SmallMultiples({ data, programs, country }: { data: ProgramMetrics[]; programs: ProgramType[]; country: CountryView }) {
+function SmallMultiples({ data, programs, country, yearCurr, yearPrev }: {
+  data: ProgramMetrics[]; programs: ProgramType[]; country: CountryView; yearCurr: number; yearPrev: number;
+}) {
   return (
     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12, marginTop: 16 }}>
       {programs.map((prog) => {
         const mod = MODALIDAD[prog];
         const chartData = (country === "Consolidado" ? COUNTRIES : [country as Country]).map((c) => ({
           country: c,
-          "2025": aggregate(filterData(data, 2025, c, [prog])).ventas_monto,
-          "2026": aggregate(filterData(data, 2026, c, [prog])).ventas_monto,
+          [String(yearPrev)]: aggregate(filterData(data, yearPrev, c, [prog])).ventas_monto,
+          [String(yearCurr)]: aggregate(filterData(data, yearCurr, c, [prog])).ventas_monto,
         }));
         return (
           <div key={prog} style={{ background: C.card, borderRadius: 10, padding: "14px 16px", border: `1px solid ${C.border}` }}>
@@ -272,8 +269,8 @@ function SmallMultiples({ data, programs, country }: { data: ProgramMetrics[]; p
                 <XAxis dataKey="country" tick={{ fill: C.muted, fontSize: 10 }} axisLine={false} tickLine={false} />
                 <YAxis tick={{ fill: C.muted, fontSize: 9 }} axisLine={false} tickLine={false} tickFormatter={(v) => `$${fmt(v)}`} width={46} />
                 <Tooltip content={<Tooltip_ />} />
-                <Bar dataKey="2025" fill={C.y2025} radius={[3,3,0,0]} />
-                <Bar dataKey="2026" fill={C.y2026} radius={[3,3,0,0]} />
+                <Bar dataKey={String(yearPrev)} fill={C.yPrev} radius={[3,3,0,0]} />
+                <Bar dataKey={String(yearCurr)} fill={C.yCurr} radius={[3,3,0,0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -287,51 +284,66 @@ function SmallMultiples({ data, programs, country }: { data: ProgramMetrics[]; p
 function LoginScreen({ onLogin }: { onLogin: () => void }) {
   const [pw, setPw] = useState("");
   const [err, setErr] = useState(false);
-
   const handleLogin = () => {
     if (pw === "consejo") { onLogin(); return; }
-    setErr(true); setPw("");
-    setTimeout(() => setErr(false), 3000);
+    setErr(true); setPw(""); setTimeout(() => setErr(false), 3000);
   };
-
   return (
-    <div style={{
-      position: "fixed", inset: 0,
-      background: "linear-gradient(135deg, #1e1b4b 0%, #312e81 100%)",
-      display: "flex", alignItems: "center", justifyContent: "center",
-    }}>
-      <div style={{
-        background: "rgba(255,255,255,0.1)", backdropFilter: "blur(10px)",
-        borderRadius: 20, padding: 50, border: "1px solid rgba(255,255,255,0.2)",
-        textAlign: "center", maxWidth: 400, width: "90%",
-      }}>
+    <div style={{ position: "fixed", inset: 0, background: "linear-gradient(135deg, #1e1b4b 0%, #312e81 100%)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ background: "rgba(255,255,255,0.1)", backdropFilter: "blur(10px)", borderRadius: 20, padding: 50, border: "1px solid rgba(255,255,255,0.2)", textAlign: "center", maxWidth: 400, width: "90%" }}>
         <Image src="/yoy/logo-adipa.svg" alt="ADIPA" width={160} height={50} style={{ margin: "0 auto 16px" }} />
         <div style={{ color: "rgba(255,255,255,0.6)", fontSize: 12, marginBottom: 8 }}>adipa.report/yoy</div>
         <div style={{ color: "#fff", fontSize: 18, fontWeight: 600, marginBottom: 36 }}>Unit Economics & Ventas</div>
-        <input
-          type="password" placeholder="Contraseña" value={pw}
-          onChange={(e) => setPw(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && handleLogin()}
-          style={{
-            width: "100%", padding: 14, borderRadius: 10,
-            border: "2px solid rgba(255,255,255,0.3)",
-            background: "rgba(255,255,255,0.1)", color: "#fff",
-            fontSize: 15, marginBottom: 16, outline: "none", boxSizing: "border-box",
-          }}
+        <input type="password" placeholder="Contraseña" value={pw}
+          onChange={(e) => setPw(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleLogin()}
+          style={{ width: "100%", padding: 14, borderRadius: 10, border: "2px solid rgba(255,255,255,0.3)", background: "rgba(255,255,255,0.1)", color: "#fff", fontSize: 15, marginBottom: 16, outline: "none", boxSizing: "border-box" }}
         />
-        <button onClick={handleLogin} style={{
-          width: "100%", padding: 14,
-          background: "linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%)",
-          border: "none", borderRadius: 10, color: "#fff",
-          fontSize: 15, fontWeight: 700, cursor: "pointer",
-        }}>
+        <button onClick={handleLogin} style={{ width: "100%", padding: 14, background: "linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%)", border: "none", borderRadius: 10, color: "#fff", fontSize: 15, fontWeight: 700, cursor: "pointer" }}>
           Ingresar
         </button>
-        {err && (
-          <div style={{ color: C.red, background: "#f8717118", padding: 10, borderRadius: 8, marginTop: 14, fontSize: 13 }}>
-            Contraseña incorrecta
-          </div>
-        )}
+        {err && <div style={{ color: C.red, background: "#f8717118", padding: 10, borderRadius: 8, marginTop: 14, fontSize: 13 }}>Contraseña incorrecta</div>}
+      </div>
+    </div>
+  );
+}
+
+// ─── Date Picker ─────────────────────────────────────────────────────────────
+function DateRangePicker({ dateFrom, dateTo, onChange, loading }: {
+  dateFrom: string; dateTo: string;
+  onChange: (from: string, to: string) => void;
+  loading: boolean;
+}) {
+  const [from, setFrom] = useState(dateFrom);
+  const [to,   setTo]   = useState(dateTo);
+
+  const apply = () => { if (from && to && from <= to) onChange(from, to); };
+
+  const inputStyle = {
+    background: "#1c1f3a", border: `1px solid #2e2b4a`, color: "#eae8f0",
+    borderRadius: 8, padding: "7px 12px", fontSize: 13, outline: "none",
+    colorScheme: "dark" as const,
+  };
+  const labelStyle = { fontSize: 10, color: "#9994b0", textTransform: "uppercase" as const, letterSpacing: "0.06em", fontWeight: 600, marginBottom: 4, display: "block" };
+
+  return (
+    <div style={{ display: "flex", alignItems: "flex-end", gap: 12, flexWrap: "wrap", background: "#1c1f3a", border: "1px solid #2e2b4a", borderRadius: 12, padding: "14px 18px", marginBottom: 20 }}>
+      <div>
+        <label style={labelStyle}>Desde</label>
+        <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} style={inputStyle} />
+      </div>
+      <div>
+        <label style={labelStyle}>Hasta</label>
+        <input type="date" value={to} onChange={(e) => setTo(e.target.value)} style={inputStyle} />
+      </div>
+      <button onClick={apply} disabled={loading} style={{
+        padding: "8px 20px", borderRadius: 8, border: "none", cursor: loading ? "wait" : "pointer",
+        background: loading ? "#4a4368" : "linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%)",
+        color: "#fff", fontSize: 13, fontWeight: 700, marginBottom: 1,
+      }}>
+        {loading ? "Cargando..." : "Aplicar"}
+      </button>
+      <div style={{ fontSize: 11, color: "#9994b0", alignSelf: "center" }}>
+        Compara el período seleccionado vs el mismo período del año anterior
       </div>
     </div>
   );
@@ -341,20 +353,34 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
 type ViewMode = "consolidated" | "modalidad" | ProgramType;
 
 export default function Dashboard() {
-  const [loggedIn, setLoggedIn]   = useState(false);
-  const [view, setView]           = useState<ViewMode>("consolidated");
-  const [country, setCountry]     = useState<CountryView>("Consolidado");
-  const [data, setData]           = useState<ProgramMetrics[]>([]);
-  const [source, setSource]       = useState<"bigquery" | "mock">("mock");
-  const [loading, setLoading]     = useState(true);
+  const [loggedIn, setLoggedIn] = useState(false);
+  const [view,     setView]     = useState<ViewMode>("consolidated");
+  const [country,  setCountry]  = useState<CountryView>("Consolidado");
+  const [data,     setData]     = useState<ProgramMetrics[]>([]);
+  const [source,   setSource]   = useState<"bigquery" | "mock">("mock");
+  const [loading,  setLoading]  = useState(true);
+  const [dateFrom, setDateFrom] = useState("2026-01-01");
+  const [dateTo,   setDateTo]   = useState(today());
+  const [yearCurr, setYearCurr] = useState(2026);
+  const [yearPrev, setYearPrev] = useState(2025);
 
-  useEffect(() => {
-    fetch("/yoy/api/data")
+  const fetchData = (from: string, to: string) => {
+    setLoading(true);
+    fetch(`/yoy/api/data?from=${from}&to=${to}`)
       .then((r) => r.json())
-      .then((res) => { setData(res.data); setSource(res.source); })
+      .then((res) => {
+        setData(res.data);
+        setSource(res.source);
+        setDateFrom(from);
+        setDateTo(to);
+        setYearCurr(parseInt(to.slice(0, 4)));
+        setYearPrev(parseInt(to.slice(0, 4)) - 1);
+      })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, []);
+  };
+
+  useEffect(() => { fetchData(dateFrom, dateTo); }, []); // eslint-disable-line
 
   const syncPrograms  = useMemo(() => PROGRAMS.filter((p) => MODALIDAD[p] === "Sincrónico"),  []);
   const asyncPrograms = useMemo(() => PROGRAMS.filter((p) => MODALIDAD[p] === "Asincrónico"), []);
@@ -367,26 +393,33 @@ export default function Dashboard() {
 
   if (!loggedIn) return <LoginScreen onLogin={() => setLoggedIn(true)} />;
 
-  const activePrograms =
-    view === "consolidated" ? PROGRAMS :
-    view === "modalidad"    ? PROGRAMS :
-    [view as ProgramType];
+  const activePrograms = view === "consolidated" || view === "modalidad" ? PROGRAMS : [view as ProgramType];
+  const periodLabel = `${dateFrom} → ${dateTo}`;
+  const prevLabel   = `${startOfYear(dateFrom.replace(String(yearCurr), String(yearPrev)))} → ${dateTo.replace(String(yearCurr), String(yearPrev))}`;
+  const metricProps = { yearCurr, yearPrev };
 
   return (
     <div style={{ background: C.bg, minHeight: "100vh", color: C.text, fontFamily: "'DM Sans', system-ui, sans-serif", padding: "24px 28px" }}>
       <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
 
       {/* Header */}
-      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 8 }}>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 20 }}>
         <div>
-          <div style={{ fontSize: 11, color: C.purple, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em" }}>
-            ADIPA — Unit Economics & Ventas
-          </div>
-          <h1 style={{ fontSize: 26, fontWeight: 800, margin: "6px 0 4px", letterSpacing: "-0.03em" }}>
-            Comparativo Ene-Feb 2025 vs 2026
+          <div style={{ fontSize: 11, color: C.purple, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em" }}>ADIPA — Unit Economics & Ventas</div>
+          <h1 style={{ fontSize: 24, fontWeight: 800, margin: "6px 0 4px", letterSpacing: "-0.03em" }}>
+            Comparativo YoY —{" "}
+            <span style={{ color: C.yCurr }}>{yearCurr}</span>
+            {" "}vs{" "}
+            <span style={{ color: C.yPrev }}>{yearPrev}</span>
           </h1>
-          <p style={{ fontSize: 12, color: C.muted, margin: 0 }}>
-            Fuente:{" "}
+          <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 4, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 11, color: C.muted }}>
+              Período: <span style={{ color: C.cyan }}>{periodLabel}</span>
+            </span>
+            <span style={{ fontSize: 11, color: C.muted }}>·</span>
+            <span style={{ fontSize: 11, color: C.muted }}>
+              vs: <span style={{ color: C.yPrev }}>{prevLabel}</span>
+            </span>
             <span style={{
               padding: "1px 8px", borderRadius: 4, fontSize: 11, fontWeight: 700,
               background: source === "bigquery" ? "#34d39918" : "#f59e0b18",
@@ -394,13 +427,16 @@ export default function Dashboard() {
             }}>
               {source === "bigquery" ? "BigQuery" : "Datos de ejemplo"}
             </span>
-          </p>
+          </div>
         </div>
         <Image src="/yoy/logo-adipa.svg" alt="ADIPA" width={100} height={54} />
       </div>
 
+      {/* Date Range Picker */}
+      <DateRangePicker dateFrom={dateFrom} dateTo={dateTo} onChange={fetchData} loading={loading} />
+
       {/* Country tabs */}
-      <div style={{ display: "flex", gap: 6, margin: "20px 0 8px", flexWrap: "wrap" }}>
+      <div style={{ display: "flex", gap: 6, marginBottom: 8, flexWrap: "wrap" }}>
         <span style={{ fontSize: 10, color: C.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 600, alignSelf: "center", marginRight: 4 }}>País:</span>
         {COUNTRY_VIEWS.map((cv) => (
           <button key={cv} onClick={() => setCountry(cv)} style={{
@@ -423,8 +459,7 @@ export default function Dashboard() {
             padding: "6px 14px", borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: "pointer",
             background: view === key ? C.purple : "transparent",
             border: `1px solid ${view === key ? C.purple : C.border}`,
-            color: view === key ? "#fff" : C.muted,
-            transition: "all 0.15s",
+            color: view === key ? "#fff" : C.muted, transition: "all 0.15s",
           }}>
             {label}
           </button>
@@ -435,7 +470,6 @@ export default function Dashboard() {
         <div style={{ color: C.muted, textAlign: "center", paddingTop: 80, fontSize: 14 }}>Cargando datos...</div>
       ) : (
         <>
-          {/* Single program or consolidated */}
           {view !== "modalidad" && (
             <>
               {view !== "consolidated" && MODALIDAD[view as ProgramType] && (
@@ -450,32 +484,29 @@ export default function Dashboard() {
                   </span>
                 </div>
               )}
-              <MetricBlock data={data} country={country} programs={activePrograms} />
+              <MetricBlock data={data} country={country} programs={activePrograms} {...metricProps} />
               {view === "consolidated" && (
                 <div style={{ marginTop: 32 }}>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: C.muted, marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.04em" }}>
-                    Ventas por Tipo de Programa
-                  </div>
-                  <SmallMultiples data={data} programs={PROGRAMS} country={country} />
+                  <div style={{ fontSize: 14, fontWeight: 700, color: C.muted, marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.04em" }}>Ventas por Tipo de Programa</div>
+                  <SmallMultiples data={data} programs={PROGRAMS} country={country} {...metricProps} />
                 </div>
               )}
             </>
           )}
 
-          {/* Modalidad view */}
           {view === "modalidad" && (
             <>
               <div style={{ borderTop: `2px solid ${C.cyan}44`, paddingTop: 20, marginBottom: 32 }}>
                 <div style={{ fontSize: 18, fontWeight: 800, color: C.cyan, marginBottom: 4 }}>Sincrónico</div>
                 <div style={{ fontSize: 11, color: C.muted, marginBottom: 16 }}>{syncPrograms.join(" · ")}</div>
-                <MetricBlock data={data} country={country} programs={syncPrograms} />
-                <SmallMultiples data={data} programs={syncPrograms} country={country} />
+                <MetricBlock data={data} country={country} programs={syncPrograms} {...metricProps} />
+                <SmallMultiples data={data} programs={syncPrograms} country={country} {...metricProps} />
               </div>
               <div style={{ borderTop: `2px solid ${C.amber}44`, paddingTop: 20 }}>
                 <div style={{ fontSize: 18, fontWeight: 800, color: C.amber, marginBottom: 4 }}>Asincrónico</div>
                 <div style={{ fontSize: 11, color: C.muted, marginBottom: 16 }}>{asyncPrograms.join(" · ")}</div>
-                <MetricBlock data={data} country={country} programs={asyncPrograms} />
-                <SmallMultiples data={data} programs={asyncPrograms} country={country} />
+                <MetricBlock data={data} country={country} programs={asyncPrograms} {...metricProps} />
+                <SmallMultiples data={data} programs={asyncPrograms} country={country} {...metricProps} />
               </div>
             </>
           )}
@@ -484,8 +515,8 @@ export default function Dashboard() {
 
       <div style={{ marginTop: 32, padding: "14px 18px", background: "#1c1f3a80", borderRadius: 10, border: `1px solid ${C.border}`, fontSize: 12, color: C.muted }}>
         {source === "mock"
-          ? "Datos de ejemplo. Configura BQ_DATASET, BQ_TABLE y BQ_SERVICE_ACCOUNT en Vercel para conectar BigQuery."
-          : "Datos en tiempo real desde BigQuery · adipa-cl-331013"}
+          ? "Datos de ejemplo — configura BQ_SERVICE_ACCOUNT en Vercel para conectar BigQuery."
+          : `Datos en tiempo real desde BigQuery · adipa-cl-331013 · ${periodLabel}`}
       </div>
     </div>
   );

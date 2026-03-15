@@ -29,6 +29,8 @@ function getClient(): BigQuery {
   });
 }
 
+// Query accepts a date range for the "current" period.
+// The previous period is the same date range shifted back 1 year.
 const QUERY = `
 WITH all_ventas AS (
   SELECT Cust_id, Date_oc, Tipo_producto, Pais, Id_oc,
@@ -57,18 +59,33 @@ ventas_period AS (
     v.Cust_id, v.Tipo_producto, v.Pais, v.Id_oc,
     v.Valor_pagado,
     COALESCE(v.Num_items_sold, 1) AS Num_items_sold,
-    EXTRACT(YEAR FROM v.Date_oc) AS anio,
+    -- Label each row as current year or previous year
     CASE
-      WHEN EXTRACT(YEAR  FROM fp.primera_compra) = EXTRACT(YEAR  FROM v.Date_oc)
-       AND EXTRACT(MONTH FROM fp.primera_compra) IN (1, 2)
-      THEN TRUE ELSE FALSE
+      WHEN DATE(v.Date_oc) BETWEEN @date_from AND @date_to
+      THEN EXTRACT(YEAR FROM @date_to)
+      ELSE EXTRACT(YEAR FROM DATE_SUB(@date_to, INTERVAL 1 YEAR))
+    END AS anio,
+    -- New client = first purchase falls within the same period (current or prev)
+    CASE
+      WHEN DATE(v.Date_oc) BETWEEN @date_from AND @date_to
+        AND DATE(fp.primera_compra) BETWEEN @date_from AND @date_to
+      THEN TRUE
+      WHEN DATE(v.Date_oc) BETWEEN DATE_SUB(@date_from, INTERVAL 1 YEAR)
+                                AND DATE_SUB(@date_to, INTERVAL 1 YEAR)
+        AND DATE(fp.primera_compra) BETWEEN DATE_SUB(@date_from, INTERVAL 1 YEAR)
+                                        AND DATE_SUB(@date_to, INTERVAL 1 YEAR)
+      THEN TRUE
+      ELSE FALSE
     END AS es_nuevo
   FROM all_ventas v
   LEFT JOIN first_purchase fp ON v.Cust_id = fp.Cust_id
-  WHERE EXTRACT(MONTH FROM v.Date_oc) IN (1, 2)
-    AND EXTRACT(YEAR  FROM v.Date_oc) IN (2025, 2026)
-    AND v.Tipo_producto NOT IN UNNEST(@excluded)
-    AND v.Tipo_producto IS NOT NULL
+  WHERE (
+    DATE(v.Date_oc) BETWEEN @date_from AND @date_to
+    OR DATE(v.Date_oc) BETWEEN DATE_SUB(@date_from, INTERVAL 1 YEAR)
+                           AND DATE_SUB(@date_to, INTERVAL 1 YEAR)
+  )
+  AND v.Tipo_producto NOT IN UNNEST(@excluded)
+  AND v.Tipo_producto IS NOT NULL
 )
 SELECT
   Pais                                                       AS country,
@@ -88,11 +105,19 @@ GROUP BY country, program, year
 ORDER BY country, program, year
 `;
 
-export async function fetchMetricsFromBQ(): Promise<ProgramMetrics[]> {
+export async function fetchMetricsFromBQ(dateFrom: string, dateTo: string): Promise<ProgramMetrics[]> {
   const bq = getClient();
   const [rows] = await bq.query({
     query: QUERY,
-    params: { excluded: EXCLUDED },
+    params: {
+      date_from: dateFrom,
+      date_to:   dateTo,
+      excluded:  EXCLUDED,
+    },
+    types: {
+      date_from: "DATE",
+      date_to:   "DATE",
+    },
   });
 
   return rows

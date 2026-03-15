@@ -45,4 +45,6 @@ export interface ApiResponse {
   data: ProgramMetrics[];
   source: "bigquery" | "mock";
   error?: string;
+  dateFrom?: string;
+  dateTo?: string;
 }
